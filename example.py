@@ -4,6 +4,7 @@ os.environ['SPCONV_ALGO'] = 'native'        # Can be 'native' or 'auto', default
                                             # 'auto' is faster but will do benchmarking at the beginning.
                                             # Recommended to set to 'native' if run only once.
 
+#NOTE: the print statement comes from /home/weihan/scratch/TRELLIS/trellis/modules/sparse/__init__.py
 import imageio
 from PIL import Image
 from trellis.pipelines import TrellisImageTo3DPipeline
@@ -35,7 +36,7 @@ outputs = pipeline.run(
 # - outputs['radiance_field']: a list of radiance fields
 # - outputs['mesh']: a list of meshes
 
-# Render the outputs
+# Render the outputs, using each data type's renderer
 video = render_utils.render_video(outputs['gaussian'][0])['color']
 imageio.mimsave("sample_gs.mp4", video, fps=30)
 video = render_utils.render_video(outputs['radiance_field'][0])['color']

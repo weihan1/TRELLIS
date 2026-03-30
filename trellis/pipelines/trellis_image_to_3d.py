@@ -137,8 +137,8 @@ class TrellisImageTo3DPipeline(Pipeline):
         else:
             raise ValueError(f"Unsupported type of image: {type(image)}")
         
-        image = self.image_cond_model_transform(image).to(self.device)
-        features = self.models['image_cond_model'](image, is_training=True)['x_prenorm']
+        image = self.image_cond_model_transform(image).to(self.device) # normalizes the image
+        features = self.models['image_cond_model'](image, is_training=True)['x_prenorm'] #(b, seq_leng, features)
         patchtokens = F.layer_norm(features, features.shape[-1:])
         return patchtokens
         
@@ -176,9 +176,11 @@ class TrellisImageTo3DPipeline(Pipeline):
         # Sample occupancy latent
         flow_model = self.models['sparse_structure_flow_model']
         reso = flow_model.resolution
-        noise = torch.randn(num_samples, flow_model.in_channels, reso, reso, reso).to(self.device)
+
+        #start from noise distribution (b, features, res,res,res)
+        noise = torch.randn(num_samples, flow_model.in_channels, reso, reso, reso).to(self.device) 
         sampler_params = {**self.sparse_structure_sampler_params, **sampler_params}
-        z_s = self.sparse_structure_sampler.sample(
+        z_s = self.sparse_structure_sampler.sample( #sample from ode network, while conditioning on the vit features
             flow_model,
             noise,
             **cond,
@@ -187,8 +189,8 @@ class TrellisImageTo3DPipeline(Pipeline):
         ).samples
         
         # Decode occupancy latent
-        decoder = self.models['sparse_structure_decoder']
-        coords = torch.argwhere(decoder(z_s)>0)[:, [0, 2, 3, 4]].int()
+        decoder = self.models['sparse_structure_decoder'] #(b, 1, res,res,res)
+        coords = torch.argwhere(decoder(z_s)>0)[:, [0, 2, 3, 4]].int() #gives u the 3D coordinates where the feature at that voxel is not empty.
 
         return coords
 
@@ -231,7 +233,7 @@ class TrellisImageTo3DPipeline(Pipeline):
             sampler_params (dict): Additional parameters for the sampler.
         """
         # Sample structured latent
-        flow_model = self.models['slat_flow_model']
+        flow_model = self.models['slat_flow_model'] # different flow model
         noise = sp.SparseTensor(
             feats=torch.randn(coords.shape[0], flow_model.in_channels).to(self.device),
             coords=coords,
@@ -247,7 +249,7 @@ class TrellisImageTo3DPipeline(Pipeline):
 
         std = torch.tensor(self.slat_normalization['std'])[None].to(slat.device)
         mean = torch.tensor(self.slat_normalization['mean'])[None].to(slat.device)
-        slat = slat * std + mean
+        slat = slat * std + mean #apply normalization
         
         return slat
 
@@ -276,11 +278,12 @@ class TrellisImageTo3DPipeline(Pipeline):
         """
         if preprocess_image:
             image = self.preprocess_image(image)
-        cond = self.get_cond([image])
-        torch.manual_seed(seed)
+        cond = self.get_cond([image]) #apply dino encoder, cond is of shape (b, seq_len, feat_dim)
+        torch.manual_seed(seed) 
+        #basically this part first use an ODE solver using empty 3D noise, and then resample again but using like non-empty features.
         coords = self.sample_sparse_structure(cond, num_samples, sparse_structure_sampler_params)
-        slat = self.sample_slat(cond, coords, slat_sampler_params)
-        return self.decode_slat(slat, formats)
+        slat = self.sample_slat(cond, coords, slat_sampler_params) #(N_active, features)
+        return self.decode_slat(slat, formats) #decode to radiance fields, 3DGS, and mesh.
 
     @contextmanager
     def inject_sampler_multi_image(
